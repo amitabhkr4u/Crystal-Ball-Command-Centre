@@ -1,5 +1,6 @@
 import type { Approval, Triage } from "../lib/schemas";
 
+// Shows approvals in the recommended review order.
 export function TriageList({ triage, approvals }: { triage: Triage; approvals: Approval[] }) {
   const title = (id: string) => approvals.find((a) => a.id === id)?.title ?? id;
   return (

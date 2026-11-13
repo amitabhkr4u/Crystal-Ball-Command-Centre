@@ -69,6 +69,21 @@ describe("streamAi", () => {
     expect((init.headers as Record<string, string>)["X-Session-Id"]).toBe("sess-1");
   });
 
+  it("flushes a final SSE frame when the stream closes without a blank-line terminator", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sseResponse(['event: token\ndata: {"text":"final token"}\n\nevent: done\ndata: {"fallback":false}'])
+      )
+    );
+
+    const events = await collect(streamAi("summary", {}, { sessionId: "s-final" }));
+    expect(events).toEqual([
+      { type: "token", text: "final token" },
+      { type: "done", fallback: false }
+    ]);
+  });
+
   it("turns a 429 into a typed ApiError with the server's message", async () => {
     vi.stubGlobal(
       "fetch",
@@ -126,5 +141,26 @@ describe("fetchHealth", () => {
       })
     );
     await expect(fetchHealth()).resolves.toBe(false);
+  });
+});
+
+describe("acknowledgeAlert", () => {
+  it("posts to the acknowledge endpoint with the bearer token and returns the data field", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: { alertId: "a/1", classification: { severity: "P0" } } }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { acknowledgeAlert } = await import("../../lib/api");
+
+    const result = await acknowledgeAlert("tok", "a/1");
+
+    expect(result.alertId).toBe("a/1");
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/v1/alerts/a%2F1/acknowledge");
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer tok");
   });
 });

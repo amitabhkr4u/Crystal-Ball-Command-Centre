@@ -1,28 +1,46 @@
 "use client";
 
 import { FileImage, FileText, Folder, Video } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useAssistantStore } from "../store/assistantStore";
 import { ApiStatus } from "./ApiStatus";
 import type { Approval } from "../lib/schemas";
 
 const ICONS: Record<Approval["type"], typeof Folder> = { Folder, Video, PDF: FileText, Image: FileImage };
 
+// Lists the pending approvals.
 export function ApprovalsList() {
   const { approvals, approvalsError, loadApprovals } = useAssistantStore();
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    void loadApprovals();
+    let alive = true;
+    void loadApprovals().finally(() => {
+      if (alive) setLoaded(true);
+    });
+    return () => {
+      alive = false;
+    };
   }, [loadApprovals]);
 
   return (
-    <main className="page">
-      <h1>Approvals</h1>
+    <section className="approvals" aria-labelledby="approvals-heading">
+      <h2 id="approvals-heading">Approvals</h2>
       <p className="muted">Items waiting for your review.</p>
       <ApiStatus />
       {approvalsError && (
         <p className="error" role="alert">
           {approvalsError}
+        </p>
+      )}
+      {!loaded && (
+        <p className="muted" role="status">
+          Loading approvals…
+        </p>
+      )}
+      {loaded && !approvalsError && approvals.length === 0 && (
+        <p className="empty-events" role="status">
+          No approvals are waiting for review.
         </p>
       )}
       <ul className="approval-list">
@@ -46,6 +64,6 @@ export function ApprovalsList() {
           );
         })}
       </ul>
-    </main>
+    </section>
   );
 }

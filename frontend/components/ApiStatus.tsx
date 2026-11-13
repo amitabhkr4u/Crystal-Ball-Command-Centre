@@ -5,18 +5,17 @@ import { useEffect, useState } from "react";
 import { fetchHealth } from "../lib/api";
 import { useAssistantStore } from "../store/assistantStore";
 
-/**
- * Swagger UI is served by the backend. It is linked directly (not through the Next proxy) because
- * Next strips trailing slashes while Swagger UI needs one, which would redirect-loop behind the proxy.
- */
 const DOCS_URL = process.env.NEXT_PUBLIC_API_DOCS_URL ?? "http://localhost:4000/api/docs/";
 
 type Health = "checking" | "online" | "offline";
 
-/** Every endpoint of the API and the part of the UI that consumes it (the "API map" shown to reviewers). */
 export const API_MAP = [
   { method: "GET", path: "/api/health", usedBy: "Status chip (this bar)" },
   { method: "GET", path: "/api/approvals", usedBy: "Approvals list" },
+  { method: "POST", path: "/api/v1/auth/login", usedBy: "Tenant sign in" },
+  { method: "POST", path: "/api/v1/alerts/classify", usedBy: "Asynchronous IoT alert classification" },
+  { method: "POST", path: "/api/v1/alerts/{alertId}/override", usedBy: "Audited human override and rerouting" },
+  { method: "Socket.IO", path: "ai:classification:completed", usedBy: "Live alert intelligence feed" },
   { method: "POST", path: "/api/ai/summary", usedBy: "Present me Summary" },
   { method: "POST", path: "/api/ai/talk", usedBy: "Talk to me" },
   { method: "POST", path: "/api/ai/help", usedBy: "Help me" },
@@ -26,6 +25,7 @@ export const API_MAP = [
 
 const LABEL: Record<Health, string> = { checking: "Checking API…", online: "API online", offline: "API offline" };
 
+// Shows API health, docs link and the dev inspector toggle.
 export function ApiStatus() {
   const devMode = useAssistantStore((s) => s.devMode);
   const toggleDevMode = useAssistantStore((s) => s.toggleDevMode);

@@ -45,7 +45,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-/** Builds a scripted stream; a Promise in the list is a gate the test releases by hand. */
+// Builds a scripted stream where promises act as manual gates.
 function script(items: Array<Ev | Promise<void> | Error>): AsyncGenerator<Ev> {
   return (async function* () {
     for (const item of items) {
@@ -58,7 +58,7 @@ function script(items: Array<Ev | Promise<void> | Error>): AsyncGenerator<Ev> {
 
 beforeEach(() => {
   useAssistantStore.setState(useAssistantStore.getInitialState(), true);
-  useAssistantStore.setState({ approvals: APPROVALS });
+  useAssistantStore.setState({ approvals: APPROVALS, open: true });
   streamAi.mockReset();
 });
 

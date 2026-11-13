@@ -41,10 +41,10 @@ describe("ApiStatus bar", () => {
     expect(await screen.findByText("API offline")).toBeInTheDocument();
   });
 
-  it("lists all 7 endpoints in the API map", async () => {
+  it("lists every endpoint in the API map", async () => {
     fetchHealth.mockResolvedValue(true);
     render(<ApiStatus />);
-    expect(API_MAP).toHaveLength(7);
+    expect(API_MAP).toHaveLength(11);
     for (const e of API_MAP) expect(screen.getByText(`${e.method} ${e.path}`)).toBeInTheDocument();
     await screen.findByText("API online");
   });

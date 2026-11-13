@@ -1,8 +1,3 @@
-/**
- * Browser-side copy of the API contract (only what the UI receives).
- * The backend owns the full contract in backend/src/schemas.ts; keep the two in sync.
- * Every response and SSE frame is validated here so the UI never trusts raw model output.
- */
 import { z } from "zod";
 
 export const ApprovalTypeSchema = z.enum(["Folder", "Video", "PDF", "Image"]);
@@ -53,7 +48,6 @@ export const TokenEventSchema = z.object({ text: z.string() });
 export const DoneEventSchema = z.object({ fallback: z.boolean() });
 export const ErrorEventSchema = z.object({ code: z.string(), message: z.string() });
 
-/** Non-streaming error body: every 4xx/5xx the API returns has this shape. */
 export const ErrorBodySchema = z.object({
   error: z.object({
     code: z.string(),

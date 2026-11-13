@@ -39,6 +39,7 @@ const ACTIONS = [
   }
 ];
 
+// Shows the assistant action buttons.
 export function ActionCards({ onSelect }: { onSelect: (mode: Mode) => void }) {
   const devMode = useAssistantStore((s) => s.devMode);
   return (

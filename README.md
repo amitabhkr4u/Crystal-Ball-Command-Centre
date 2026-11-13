@@ -1,380 +1,341 @@
-# Crystal Ball Command Centre - Approvals Assistant
+# Crystal Ball Command Centre
 
-A working rebuild of the OomniEye "Approvals" assistant panel. It has five entry points, each backed by a real Claude call and a tested non-AI fallback:
-**Present me Summary**, **Talk to me**, **Help me**, **Teach me** and **Replay Greeting**.
+## Project overview
 
-This single README is the complete guide: what is in the repository, how to run it, how it works, how it is tested, and what was deliberately left out.
+Crystal Ball is a multi-tenant operations command centre built with Next.js, React, Node.js, Express and TypeScript. It brings operational approvals, IoT alert handling, AI-assisted classification, maintenance knowledge retrieval and live operator updates into one application.
 
-## Contents
+The project is organised around clear ownership of the frontend, API, background processing and data stores. The implementation includes authentication and role-based access control, tenant-scoped operations, API documentation, automated tests, Docker deployment, monitoring configuration and operational documentation.
 
-1. [Overview](#1-overview)
-2. [Skills demonstrated](#2-skills-demonstrated)
-3. [Run it locally](#3-run-it-locally)
-4. [Try it](#4-try-it)
-5. [Technologies used](#5-technologies-used)
-6. [Architecture](#6-architecture)
-7. [The five entry points](#7-the-five-entry-points)
-8. [API reference](#8-api-reference)
-9. [Failure handling](#9-failure-handling)
-10. [Frontend design](#10-frontend-design)
-11. [Tests and quality checks](#11-tests-and-quality-checks)
-12. [Configuration](#12-configuration)
-13. [Assignment checklist](#13-assignment-checklist)
-14. [Assumptions, substitutions and limitations](#14-assumptions-substitutions-and-limitations)
-15. [AI tools used](#15-ai-tools-used)
-16. [Short write-up](#16-short-write-up)
+## Why Docker is used
 
-## 1. Overview
+Docker is the standard way to run this project locally. The application and its supporting services run in containers, so a developer or interviewer does not need to install Node.js, npm, MongoDB, PostgreSQL, Redis, MinIO, ClamAV or the frontend/backend packages directly on the host machine.
 
-The repository holds two independent apps. Each has its own `package.json`, TypeScript config and tests.
+Docker builds the frontend and backend images and installs the Node.js packages inside the image build process using the committed lockfiles. Docker Compose starts the application and its supporting services together. The host machine only needs:
 
-| Folder | What it is | Port | Stack |
-| --- | --- | --- | --- |
-| [`backend/`](backend) | REST + Server-Sent Events API, AI layer, fallbacks, retrieval | 4000 | Node 20+, Express 4, TypeScript (strict), Zod, Anthropic SDK, Jest + Supertest |
-| [`frontend/`](frontend) | Assistant panel UI | 3000 | Next.js 14, React 18, Zustand, Zod, Vitest + Testing Library |
+- Docker Desktop with Docker Compose v2 on Windows or macOS, or Docker Engine with the Compose plugin on Linux.
+- Git, if the project is being cloned from a repository.
+- A modern browser.
 
-```
-.
-|-- backend/    API server
-|-- frontend/   Web UI
-`-- .github/    CI workflow: runs the checks of both apps
-```
+The first image build requires an internet connection to download base images and package dependencies. After the images have been built, containers can be started again without reinstalling project packages on the host. Docker does not remove the need for Docker itself or for valid service/API credentials where an external integration is enabled.
 
-## 2. Skills demonstrated
+## Quick start for an interview or local review
 
-| Skill | Where it shows in the code |
-| --- | --- |
-| LLM integration (Claude, server-side only) | `backend/src/llm/anthropic.ts`: streaming and forced tool call; key read only in `backend/src/config.ts` |
-| Prompt engineering and versioning | `backend/src/prompts/*.ts`: one versioned export per prompt (`summary.triage.v1`, `help.v1`, ...); `activePrompts` picks the live version |
-| Structured output with validation | Summary triage is a forced tool call, parsed with Zod, and every approval id must appear exactly once (`validateTriage`) |
-| Retrieval-augmented generation | `backend/src/rag.ts`: chunk the policy note, score by keyword overlap, ground the prompt, return cited chunk ids |
-| Streaming (SSE) end to end | Server: `backend/src/routes/ai.ts`. Client: `frontend/lib/api.ts` (`fetch` + `ReadableStream`) |
-| Resilience and graceful degradation | 8 second timeout, idle timeout for streams, deterministic fallbacks, mid-stream error events |
-| API design and contract-first development | Zod schemas (`backend/src/schemas.ts`), hand-written OpenAPI 3 spec served by Swagger UI, typed error bodies |
-| Input validation and rate limiting | `validate` middleware on every AI route; per-session limiter (20 requests per minute) |
-| State management without prop drilling | Zustand store in `frontend/store/assistantStore.ts` |
-| TypeScript strict mode | `strict: true` in both `tsconfig.json` files |
-| Testing at three levels | Jest unit tests with a mocked LLM, Supertest API tests, Vitest + Testing Library UI tests |
-| Tooling and CI | Prettier, ESLint, EditorConfig, `.nvmrc`, GitHub Actions workflow |
+The commands below are run from the directory containing `docker-compose.yml`.
 
-## 3. Run it locally
-
-**Requirements:** Node.js 20 or newer and npm. Use two terminals, one for each app. Start the backend first.
-
-### Step 1: backend (terminal 1)
+### 1. Check Docker
 
 ```bash
-cd backend
-npm install
-cp .env.example .env      # optional: put your key in ANTHROPIC_API_KEY
-npm run dev               # API on http://localhost:4000
+docker --version
+docker compose version
 ```
 
-### Step 2: frontend (terminal 2)
+Start Docker Desktop first on Windows or macOS. Wait until its engine is running.
+
+### 2. Create the environment files
+
+Copy the root environment template and the backend template.
+
+**Windows PowerShell:**
+
+```powershell
+Copy-Item .env.example .env
+Copy-Item backend/.env.example backend/.env
+```
+
+**macOS / Linux:**
 
 ```bash
-cd frontend
-npm install
-cp .env.example .env      # API_URL=http://localhost:4000
-npm run dev               # UI on http://localhost:3000
+cp .env.example .env
+cp backend/.env.example backend/.env
 ```
 
-Open **http://localhost:3000**.
+Open both `.env` files and replace the example secrets with strong local values. Do not commit either file.
 
-- **With an Anthropic API key** in `backend/.env`, answers come from Claude.
-- **Without a key**, leave `ANTHROPIC_API_KEY` empty. The server logs a warning and every action still works through its built-in fallback, labelled in the UI.
-- **Swagger UI** (all 7 endpoints, try-it-out): http://localhost:4000/api/docs/
-- **Production mode** for the UI: `npm run build && npm start` inside `frontend/`.
+In the root `.env`, set at least:
 
-### Commands
+- `POSTGRES_PASSWORD` — password for the PostgreSQL owner account.
+- `APP_DB_PASSWORD` — a different password for the restricted application database account.
+- `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` — local MinIO administrator credentials.
+- `S3_ACCESS_KEY` and `S3_SECRET_KEY` — credentials for the application bucket user.
+- `GRAFANA_ADMIN_PASSWORD` — local Grafana administrator password.
+- `S3_BUCKET` — keep the supplied bucket name unless you have a reason to change it.
 
-| Command (run inside `backend/` or `frontend/`) | What it does |
-| --- | --- |
-| `npm run dev` | Backend: `tsx watch` with reload. Frontend: Next.js dev server |
-| `npm start` | Backend: run once without watching. Frontend: serve the production build |
-| `npm run build` | Frontend only: production build |
-| `npm test` | Backend: Jest + Supertest. Frontend: Vitest + Testing Library |
-| `npm run typecheck` | `tsc --noEmit` in strict mode |
-| `npm run lint` | Frontend only: `next lint` |
-| `npm run format` / `npm run format:check` | Prettier write / check |
-| `npm run verify` | Everything CI runs: format check, (lint,) typecheck, tests |
+In `backend/.env`, configure:
 
-## 4. Try it
+- `JWT_PRIVATE_KEY` and `JWT_PUBLIC_KEY` with an RSA key pair. Generate one inside a temporary Node container or on a machine that already has OpenSSL:
 
-1. Open the panel. The header, the five action cards and a language picker (English, Hindi, Spanish, French) are visible.
-2. Click **Present me Summary**: a prioritised list of the four pending approvals, then a short narration streamed token by token.
-3. Click **Talk to me** and ask a question: a multi-turn chat. The history is sent on every turn.
-4. Click **Help me** and ask "What should I check on a PDF?": the answer comes from the policy note and shows its source.
-5. Click **Teach me**: the lesson starts on its own; ask a follow-up to see it adapt.
-6. Click **Replay Greeting** several times: a fresh greeting with the live pending count and the time of day.
-7. Turn on **Dev inspector** above the approvals list. Under each answer it shows the endpoint, prompt version, live-vs-fallback and latency, for example `POST /api/ai/help · help.v1 · live LLM · 1240 ms`.
+```bash
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out jwt-private.pem
+openssl rsa -pubout -in jwt-private.pem -out jwt-public.pem
+```
 
-To see the failure handling, run the backend with `LLM_TIMEOUT_MS=1` (forced timeout), with an invalid key, or with no key. Each case still produces an answer, marked as a built-in one.
+  Copy each PEM value into the matching environment variable as one line, replacing line breaks with the literal `\n` sequence. Keep the private key secret.
+- `CORS_ORIGIN=http://localhost:3000` for local browser access.
+- `METRICS_TOKEN` with a long random value. Use the same value in `ops/metrics_token` if you intend to scrape the protected metrics endpoint.
+- `ONCALL_WEBHOOK_URL` with an HTTPS webhook receiver URL. The current production-mode API startup check requires this setting. Use a test webhook endpoint for an interview environment; do not use a fake URL if you plan to test delivery.
+- `SEED_ADMIN_PASSWORD` with a strong password if you want the migration container to create the demo tenant administrator.
+- `ANTHROPIC_API_KEY` only if you want to demonstrate live Anthropic-powered responses. The application includes non-LLM fallback behaviour for supported assistant paths.
 
-## 5. Technologies used
+The Compose file runs the API with `NODE_ENV=production`, so its production configuration checks apply even for a local Docker demonstration. Keep credentials private and use test accounts and test data only.
 
-### Backend
+### 3. Build and start the application
 
-| Technology | Why it is used |
-| --- | --- |
-| Node.js 20+, TypeScript (strict) | Runtime and type safety |
-| Express 4 | HTTP server and routing; the app factory (`createApp`) is reused by Supertest |
-| `@anthropic-ai/sdk` | Claude calls: `messages.stream` for text and a forced tool call for structured output |
-| Zod | Request validation, validation of model output, and the typed contract |
-| `express-rate-limit` | Per-session rate limiting |
-| `swagger-ui-express` | Interactive API documentation from the hand-written OpenAPI file |
-| `dotenv` | Loads `.env` |
-| `tsx` | Runs TypeScript directly for `dev` and `start` |
-| Jest, ts-jest, Supertest | Unit and HTTP tests |
+```bash
+docker compose config
+docker compose build
+docker compose up -d
+docker compose ps
+```
+
+The first build can take several minutes because Docker downloads the base images and installs frontend/backend packages inside the build containers. PostgreSQL, MongoDB, Redis, MinIO and ClamAV are also started by Compose. The migration job prepares the PostgreSQL schema and application role before the API starts.
+
+### 4. Open the application
+
+| Service | Local URL | Purpose |
+|---|---|---|
+| Frontend | http://localhost:3000 | Next.js operator interface |
+| API | http://localhost:4000 | Express API |
+| Swagger UI | http://localhost:4000/api/docs | Interactive API documentation |
+| OpenAPI JSON | http://localhost:4000/api/openapi.json | API contract |
+| API health | http://localhost:4000/api/health | Liveness check |
+| API readiness | http://localhost:4000/api/ready | Dependency readiness check |
+| Prometheus | http://localhost:9090 | Metrics and targets; bound to localhost |
+| Grafana | http://localhost:3001 | Dashboards; sign in with the root `.env` credentials |
+
+The database services and MinIO are on the private Compose network and are not published as public host ports by the supplied Compose file.
+
+### 5. Check logs and stop the stack
+
+```bash
+docker compose ps
+docker compose logs --tail=150 api worker frontend migrate
+docker compose down
+```
+
+`docker compose down` stops and removes the containers but retains named data volumes. To permanently remove the local database, object storage and monitoring data, `docker compose down -v` can be used; this is destructive and should not be used when data needs to be retained.
+
+## Running automated checks in Docker
+
+The build stages contain the source code and development dependencies. The final runtime images are intentionally smaller and do not include the complete test source tree. Build the test images from the existing Dockerfiles and run the test commands inside those images. No Node.js or npm installation is needed on the host.
+
+Run from the repository root:
+
+### Backend unit and integration tests
+
+```bash
+docker build --target build -t crystal-ball-backend-check ./backend
+docker run --rm crystal-ball-backend-check npm test
+```
+
+Run backend type checking and Prisma validation:
+
+```bash
+docker run --rm crystal-ball-backend-check npm run typecheck
+docker run --rm -e DATABASE_URL=postgresql://build:build@127.0.0.1:5432/build crystal-ball-backend-check npm run prisma:validate
+```
+
+The backend build stage already runs Prisma Client generation and the configured TypeScript build. The Jest integration tests may require the Docker daemon to have enough memory and may download the MongoDB test binary the first time they run.
+
+### Frontend checks
+
+```bash
+docker build --target build -t crystal-ball-frontend-check ./frontend
+docker run --rm crystal-ball-frontend-check npm run lint
+docker run --rm crystal-ball-frontend-check npm run typecheck
+docker run --rm crystal-ball-frontend-check npm test
+```
+
+The frontend image build stage also runs the production Next.js build. Playwright browser tests and Pact contract tests are separate checks and may require browser binaries or a running provider, depending on the test configuration.
+
+### Live API smoke test
+
+Start the Compose stack and seed a demo administrator by setting `SEED_ADMIN_PASSWORD` before the first migration. Then run the smoke script from a backend test/build image with the API reachable from the container. For a container on the same Compose network, use the API service name and port:
+
+```bash
+docker run --rm --network crystal-ball_internal \
+  -e API_BASE_URL=http://api:4000 \
+  -e SMOKE_EMAIL=admin@example.test \
+  -e SMOKE_PASSWORD='your-seed-password' \
+  -e SMOKE_TENANT_SLUG=crystal-ball-demo \
+  crystal-ball-backend-check npm run smoke:api
+```
+
+If Compose generated a different network name, find it with `docker network ls` and use the actual project network. The smoke test requires a seeded user with the required operator/admin permissions.
+
+## Architecture and technology stack
 
 ### Frontend
 
-| Technology | Why it is used |
-| --- | --- |
-| Next.js 14 (app router), React 18 | UI framework; `rewrites` proxy `/api/*` to the backend |
-| Zustand | Single store for session, messages, status, retry and the inspector switch |
-| Zod | Validates every response and every SSE frame |
-| `lucide-react` | Icons |
-| Plain CSS (`app/globals.css`) | Styling, no UI framework |
-| Vitest, Testing Library, jsdom | Component and client tests |
+- **Next.js 14 and React 18:** App Router-based operator interface.
+- **TypeScript:** typed application code and API contracts.
+- **Zustand:** shared client state.
+- **Zod:** runtime validation of structured data.
+- **Socket.IO client and Server-Sent Events:** live updates and streamed assistant responses.
+- **Vitest, Testing Library, Playwright and Pact:** component, browser and contract testing tools.
 
-### Shared tooling
+### Backend
 
-Prettier (`.prettierrc.json`), ESLint (`next lint`, frontend), EditorConfig, `.nvmrc` (Node 20), `.gitattributes` (LF line endings) and a GitHub Actions workflow (`.github/workflows/ci.yml`) that runs `npm run verify` for both apps.
+- **Node.js 20 and Express 4:** REST API and HTTP server.
+- **TypeScript:** typed services, middleware and API implementation.
+- **Mongoose:** MongoDB document models and IoT event access.
+- **Prisma:** PostgreSQL schema, migrations and typed data access.
+- **mysql2:** integration with externally managed ERP/CMMS MySQL schemas.
+- **JWT and Redis:** access/refresh token handling, rate limits and shared runtime state.
+- **BullMQ:** asynchronous AI and routing jobs.
+- **Socket.IO:** tenant-scoped real-time event delivery.
+- **Multer, AWS SDK and MinIO:** object upload and storage workflow.
+- **ClamAV:** upload malware scanning.
+- **Zod and Swagger/OpenAPI:** request validation and API documentation.
 
-## 6. Architecture
+### AI and decision layer
 
-```
-browser (Next.js, Zustand)  --POST /api/ai/*-->  Next rewrite  -->  Express (TypeScript strict)
-  fetch + ReadableStream  <-- SSE: meta/token/done/error --          |- Zod validation + per-session rate limit
-                                                                      |- aiService: prompts, retrieval, fallbacks
-                                                                      `- AnthropicLlm (8s timeout), key stays on the server
-```
+- LLM-backed alert classification with structured output validation.
+- Operator-facing assistant responses streamed to the frontend.
+- Rule-based decision routing with human override support.
+- Maintenance-document retrieval using embeddings and pgvector where configured.
+- Anomaly detection assistance for sensor history.
+- Timeout, retry, circuit-breaker and fallback handling around model calls.
+- Token usage and configured cost tracking with daily budget notification support.
 
-- The browser only talks to Next.js. `next.config.mjs` rewrites `/api/*` to the backend (`API_URL`), so the browser never needs the backend address or any key.
-- `compress: false` in `next.config.mjs` stops gzip from buffering the stream, which would break token-by-token rendering.
-- The two folders share no code. The backend owns the full contract in `backend/src/schemas.ts`; the frontend keeps the response subset it needs in `frontend/lib/schemas.ts`. Keeping them as separate deployable apps is a deliberate trade-off: no shared package or workspace tooling to set up, at the cost that a contract change must be made in both files.
+The application is designed to use deterministic rules when they are sufficient. LLM calls are reserved for tasks where language understanding or summarisation adds value. AI output is validated before it is used by application workflows, and human override remains available for operational decisions.
 
-### Backend request flow
+### Database and infrastructure responsibilities
 
-1. `POST /api/ai/<action>` arrives with an `X-Session-Id` header.
-2. The per-session rate limiter runs, then the Zod schema for that action validates the body.
-3. `services/aiService.ts` builds the prompt, calls the model through the `LlmClient` interface and yields events.
-4. `routes/ai.ts` writes each event as Server-Sent Events: `meta`, repeated `token`, then `done` or `error`.
+| Technology | Responsibility |
+|---|---|
+| MongoDB | IoT events, event history, document-oriented records and change streams |
+| PostgreSQL + pgvector | Tenant identity, users, memberships, RBAC, billing/audit records and vector retrieval |
+| MySQL | Optional read-only integration with an external ERP/CMMS schema |
+| Redis | Queue backing store, refresh-token state, rate-limit counters, Socket.IO pub/sub and short-lived cache |
+| MinIO / S3 | Object storage for uploaded files |
+| ClamAV | Malware scanning for uploaded files |
+| Prometheus | Metrics collection and alert rules |
+| Grafana | Operational dashboards |
+| Docker Compose | Local orchestration of application and infrastructure containers |
 
-### Backend folder map
+## Request flow and code organisation
 
-| Path | Responsibility |
-| --- | --- |
-| `src/index.ts` | Entry point: load config and data, create the LLM client, listen |
-| `src/app.ts` | Express app factory (also used by Supertest), health, approvals, docs and error handler |
-| `src/config.ts` | Environment parsing with defaults |
-| `src/data.ts` | Loads and validates `data/approvals.json` and `data/policy.md` |
-| `src/schemas.ts` | Zod API contract: requests, triage JSON, SSE events, error body |
-| `src/openapi.ts` | Hand-written OpenAPI 3 document served by Swagger UI |
-| `src/rag.ts` | Chunk the policy note and score chunks by keyword overlap |
-| `src/routes/ai.ts` | The five SSE routes and the SSE writer |
-| `src/middleware/` | `validate` (Zod) and `rateLimit` (per session) |
-| `src/llm/` | `LlmClient` interface, Anthropic adapter, timeout helpers |
-| `src/services/aiService.ts` | One generator per action, model-output validation, fallback selection |
-| `src/services/fallbacks.ts` | Deterministic non-AI answers |
-| `src/prompts/` | Versioned prompt exports; `index.ts` holds the active versions |
-| `tests/` | Jest + Supertest suites (LLM mocked) |
-| `data/` | Mock approvals queue and the policy note used for retrieval |
+A typical frontend request follows this path:
 
-### Frontend folder map
+1. A page or component calls the shared API client in `frontend/lib/api.ts`.
+2. The Express route applies authentication, tenant scoping, validation and permission middleware as appropriate.
+3. A controller coordinates the HTTP request and response.
+4. A service applies business rules and calls the relevant database, queue or external provider.
+5. The response is returned as JSON or streamed through SSE; live events are delivered through Socket.IO where applicable.
 
-| Path | Responsibility |
-| --- | --- |
-| `app/` | Next.js app router: layout, page, global CSS |
-| `components/ChatPanel.tsx` | Panel shell: header, language picker, states, composer |
-| `components/ActionCards.tsx` | The five entry points |
-| `components/MessageBubble.tsx`, `TriageList.tsx` | Message and triage rendering |
-| `components/ApprovalsList.tsx` | The approvals queue behind the panel |
-| `components/ApiStatus.tsx` | Health chip, Swagger link, API map, Dev inspector switch |
-| `store/assistantStore.ts` | Session, messages, status, abort, retry |
-| `lib/api.ts` | SSE client and error mapping |
-| `lib/schemas.ts` | Browser copy of the response contract (Zod) |
-| `tests/` | Vitest + Testing Library: panel states, SSE parsing, API bar |
+Important folders:
 
-### Design decisions
+```text
+backend/
+  index.ts                 API server entry point
+  src/config/              Environment and OpenAPI configuration
+  src/controllers/         HTTP request and response handlers
+  src/db/                  MongoDB, PostgreSQL, MySQL and Redis connections
+  src/integrations/        External ERP integration
+  src/middleware/          Authentication, tenant scope, permissions and errors
+  src/models/              MongoDB models
+  src/queues/              BullMQ queue definitions
+  src/routes/              API route definitions and route registry
+  src/services/            Business logic and provider integrations
+  src/sockets/             Socket.IO gateway
+  src/workers/             Background job processors
+  prisma/                  PostgreSQL schema and migrations
+  tests/                   Jest tests
 
-- Retries are disabled in the SDK: the 8 second deadline plus the fallback is the retry policy.
-- The model client sits behind the `LlmClient` interface, so tests can mock it and the provider can be swapped.
-- Prompts are versioned exports; the server uses whichever version `activePrompts` points to, so a prompt can be rolled forward or back in one line.
-- Fallback answers travel through the same SSE path as live ones, so the UI has a single rendering path.
+frontend/
+  app/                     Next.js App Router pages and styles
+  components/              Reusable UI components
+  lib/                     API client and runtime schemas
+  store/                   Zustand state stores
+  tests/                   Vitest and contract tests
 
-## 7. The five entry points
-
-| Action | Endpoint | Needs an LLM? | Fallback when the model is unavailable |
-| --- | --- | --- | --- |
-| Present me Summary | `POST /api/ai/summary` | Yes, for the ranking. A forced tool call returns triage JSON, validated by Zod; the prose is narrated afterwards from that validated list | Ranking by the policy review order, rendered as text |
-| Talk to me | `POST /api/ai/talk` | Yes: open-ended, multi-turn (history resent each turn, up to 20 messages) | The queue listed in policy order |
-| Help me | `POST /api/ai/help` | Retrieval first. If no policy chunk matches, no model call is made | The closest policy chunk, quoted |
-| Teach me | `POST /api/ai/teach` | Yes: step-by-step and adaptive; an empty history starts the lesson | A fixed five-step review routine |
-| Replay Greeting | `POST /api/ai/greeting` | Optional: a template does the job, the model adds variety (temperature 1) | A greeting with the live pending count and time of day |
-
-**Data.** `backend/data/approvals.json` has four items (Folder, Video, PDF, Image) with submitters and "Pending Review - Sep 18", validated at boot. `backend/data/policy.md` is a short policy note (about 280 words) split into 5 chunks by its `##` headings.
-
-**Urgency.** The dataset has no deadlines, so "urgent" comes from the review order in the policy note: safety PDFs, then onboarding folders, then videos, then reference images. The model and the fallback use the same rule.
-
-## 8. API reference
-
-Interactive docs: http://localhost:4000/api/docs/ (raw spec: `/api/openapi.json`). The spec is hand-written in `backend/src/openapi.ts`, and `tests/openapi.test.ts` fails if its examples stop passing the Zod schemas or if the documented endpoints drift from the mounted routes.
-
-| # | Method | Path | Called by |
-| --- | --- | --- | --- |
-| 1 | GET | `/api/health` | API status chip. Response `{ "ok": true }` |
-| 2 | GET | `/api/approvals` | Approvals list. Response `{ "approvals": Approval[] }` |
-| 3 | POST | `/api/ai/summary` | Present me Summary. Body `{ language? }`. Triage in `meta.triage`, then narration |
-| 4 | POST | `/api/ai/talk` | Talk to me. Body `{ language?, messages[1..20] }`; the last message must be from the user |
-| 5 | POST | `/api/ai/help` | Help me. Body `{ language?, question (3..500 chars) }`; `meta.sources` lists chunk ids |
-| 6 | POST | `/api/ai/teach` | Teach me. Body `{ language?, approvalId?, messages[0..20] }`; empty `messages` starts the lesson |
-| 7 | POST | `/api/ai/greeting` | Replay Greeting. Body `{ language? }` |
-
-`language` defaults to `"English"`. A message is `{ role: "user" | "assistant", content: string (1..2000) }`. The AI endpoints are rate limited per `X-Session-Id` (default 20 requests per minute).
-
-**Streaming format** of the AI endpoints:
-
-```
-event: meta
-data: {"fallback":false,"promptVersion":"talk.v1"}
-
-event: token
-data: {"text":"Start with "}
-
-event: done
-data: {"fallback":false}
+docs/                      Deployment and operational documentation
+ops/                       Prometheus and Grafana configuration
 ```
 
-An `error` event (`{ "code", "message" }`) replaces `done` when a stream breaks after tokens were sent.
+## API reference
 
-**Errors** use one shape: `{ "error": { "code", "message", "details"?: [{ "path", "message" }] } }`.
+The live Swagger UI at `/api/docs` is the authoritative interactive reference. Main routes include:
 
-| Status | Code | Meaning |
-| --- | --- | --- |
-| 200 | n/a | SSE stream, fallback answers included |
-| 400 | `VALIDATION_ERROR`, `INVALID_JSON` | Bad request body |
-| 404 | `NOT_FOUND` | Unknown route |
-| 413 | `PAYLOAD_TOO_LARGE` | Body over 32 kB |
-| 429 | `RATE_LIMITED` | Too many requests for this session |
-| 500 | `INTERNAL` | Unexpected server error |
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/health` | API liveness and capability information |
+| GET | `/api/ready` | Readiness of configured dependencies |
+| GET | `/api/approvals` | Paginated approvals data |
+| POST | `/api/v1/auth/login` | Tenant login and token issue |
+| POST | `/api/v1/auth/refresh` | Refresh-token rotation |
+| POST | `/api/v1/auth/logout` | Revoke the refresh session |
+| POST | `/api/v1/alerts/classify` | Queue tenant-scoped alert classification |
+| POST | `/api/v1/alerts/:alertId/acknowledge` | Record operator acknowledgement |
+| POST | `/api/v1/alerts/:alertId/override` | Record a human classification override |
+| GET | `/api/v1/usage/llm/daily` | Tenant-scoped daily LLM usage and cost summary |
+| POST | `/api/v1/uploads/presign` | Create a tenant-scoped upload URL |
+| POST | `/api/v1/uploads/complete` | Validate and scan an uploaded object |
+| POST | `/api/v1/maintenance-documents/index` | Index maintenance document content |
+| GET | `/api/v1/erp/work-orders/:assetCode` | Read work orders from configured ERP integration |
+| POST | `/api/ai/summary` | Stream an approval summary using SSE |
+| POST | `/api/ai/talk` | Stream an assistant conversation using SSE |
+| GET | `/metrics` | Prometheus metrics endpoint; token-protected when configured |
 
-## 9. Failure handling
+## Environment and integration notes
 
-| Situation | Behaviour |
-| --- | --- |
-| No API key | Fallback answer, `reason: "no_api_key"` |
-| Structured call exceeds 8 seconds, or a stream is silent for 8 seconds | Fallback answer, `reason: "timeout"` |
-| Provider error before any token | Fallback answer, `reason: "llm_error"` |
-| Empty or schema-invalid model output | Fallback answer, `reason: "invalid_output"` |
-| Help question with no matching policy chunk | No model call, fixed reply, `reason: "no_policy_match"` |
-| Stream dies after tokens were sent | `error` event (`STREAM_INTERRUPTED`); the UI keeps the partial text and offers Retry |
-| Invalid request | `400` with a typed error body |
-| Rate limit | `429 RATE_LIMITED` |
+- Keep `.env`, `backend/.env`, `frontend/.env.local`, private keys, webhook tokens and metrics credentials out of version control.
+- Live Anthropic responses require a valid `ANTHROPIC_API_KEY`. Without it, only the implemented fallback paths are available.
+- Embedding-based retrieval requires a configured embeddings provider and API key.
+- MySQL ERP reads remain inactive until the external schema/table/column mapping and read-only credentials are supplied by the ERP owner.
+- The current Compose deployment uses a single-node MongoDB replica set for change streams. It is suitable for local evaluation, not a high-availability production topology.
+- For production, use a TLS reverse proxy, explicit CORS origins, managed secrets, backups, restricted network access and a non-superuser PostgreSQL application role with RLS enabled.
 
-Nothing surfaces as a raw 500 on an AI route. The structured call uses a hard deadline; streams use an idle timeout that restarts on every token, so long answers are fine but a stalled connection is cut.
+## Troubleshooting
 
-## 10. Frontend design
+**Docker command cannot connect to the daemon**
 
-**Data flow.**
+Start Docker Desktop or the Docker Engine service, wait for it to become ready, and retry `docker compose ps`.
 
-1. A click on an action card calls `startMode` in the Zustand store.
-2. The store's `run()` calls `streamAi` (`lib/api.ts`): a `fetch` POST with `X-Session-Id`, then the response body is read as a stream.
-3. Each SSE frame is parsed and validated with the Zod schemas in `lib/schemas.ts`. A malformed frame becomes a typed `ApiError`.
-4. `meta` sets the fallback flag, triage and sources on the message, `token` appends text, `done` ends the stream and `error` shows the Retry state.
-5. Components only render store state; they contain no network code.
+**A container is still starting or unhealthy**
 
-**UI states.**
+```bash
+docker compose ps
+docker compose logs --tail=200 postgres mongo redis minio clamav migrate api worker frontend
+```
 
-| State | What the user sees |
-| --- | --- |
-| loading | "Thinking" status with animated dots |
-| streaming | Text growing token by token with a caret |
-| fallback | The answer plus a notice that a built-in answer is shown |
-| error | An alert (`role="alert"`) with a Retry button; partial text is kept |
+PostgreSQL and MongoDB perform initial setup on first launch. ClamAV downloads its signature database on first launch and can take additional time to become healthy.
 
-**API bar.** `components/ApiStatus.tsx` shows a live online/offline chip (`GET /api/health`), a link to Swagger UI, an **API map** of which UI part calls which of the 7 endpoints, and the **Dev inspector** switch (off by default).
+**The API does not start**
 
-## 11. Tests and quality checks
+Check that the root and backend environment files exist, required secrets are set, the webhook URL uses HTTPS, and the dependency services are healthy. Review `docker compose logs api migrate` for the exact startup error.
 
-All AI behaviour is tested with a mocked LLM, so the suites need no API key and no network.
+**The frontend cannot reach the API**
 
-| Suite | Tool | What it covers |
-| --- | --- | --- |
-| `backend/tests/aiService.test.ts` | Jest | Each action with a mocked model: structured triage, wrong-shape output, invented or omitted ids, timeout, no key, empty stream, mid-stream failure, retrieval grounding, teach history, greeting |
-| `backend/tests/api.test.ts` | Supertest | Success path, fallback and timeout path, stalled stream, validation errors, malformed JSON, 429 |
-| `backend/tests/timeout.test.ts` | Jest | `withTimeout` and `streamWithIdleTimeout` |
-| `backend/tests/fallbacks.test.ts` | Jest | Policy-order ranking, text chunking, greeting |
-| `backend/tests/rag.test.ts` | Jest | Chunking, retrieval, word forms, no-match case |
-| `backend/tests/openapi.test.ts` | Supertest | Exactly 7 documented operations, examples pass the real Zod schemas, documented endpoints are mounted, docs routes serve |
-| `frontend/tests/components/ChatPanel.test.tsx` | Vitest + Testing Library | Loading, streaming, error with Retry, fallback notice, mid-stream cut, conversation actions, language |
-| `frontend/tests/components/ApiStatus.test.tsx` | Vitest + Testing Library | Health chip, API map, Dev inspector |
-| `frontend/tests/lib/api.test.ts` | Vitest | SSE frame parsing and validation, split chunks, 429 mapping, network failure, health check |
+Check that the API health endpoint responds, the frontend container is running, and the Compose network is intact. Browser requests should use the configured same-origin/reverse-proxy path or the expected API URL.
 
-Run `npm run verify` inside each app. It is the same command CI runs.
+**A port is already in use**
 
-## 12. Configuration
+Change `WEB_PORT` or `API_PORT` in the root `.env` and recreate the affected containers with `docker compose up -d`.
 
-**Backend** (`backend/.env`, template in `backend/.env.example`):
+**Resetting a local evaluation environment**
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `ANTHROPIC_API_KEY` | empty | Server-side only. Empty means every action uses its fallback |
-| `ANTHROPIC_MODEL` | `claude-sonnet-5-5` | Model id |
-| `PORT` | `4000` | API port |
-| `LLM_TIMEOUT_MS` | `8000` | Deadline for model calls and idle timeout for streams |
-| `RATE_LIMIT_MAX` | `20` | Requests per window per session |
-| `RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit window |
+Use `docker compose down -v` only when you intentionally want to delete all named volumes and local database/object-store data. This cannot be undone.
 
-**Frontend** (`frontend/.env`, template in `frontend/.env.example`):
+## Interview walkthrough
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `API_URL` | `http://localhost:4000` | Where the Next.js server proxies `/api/*`. No secrets belong here |
-| `NEXT_PUBLIC_API_DOCS_URL` | `http://localhost:4000/api/docs/` | Target of the "API docs (Swagger)" link. It points to the backend directly because Swagger UI needs a trailing slash that the Next proxy would strip |
+A practical review can follow this sequence:
 
-## 13. Assignment checklist
+1. Start the stack using the Docker quick-start steps.
+2. Open the frontend and explain the operator-facing dashboard and shared API client.
+3. Open Swagger UI and walk through authentication, alert classification, acknowledgement and override endpoints.
+4. Trace one request from the frontend API client through route middleware, controller and service to its data store or queue.
+5. Explain why MongoDB, PostgreSQL, MySQL and Redis have separate responsibilities.
+6. Review the AI decision flow: structured output, validation, queue processing, timeout/fallback behaviour and human override.
+7. Show the Jest and Vitest test suites, then run the Docker-based checks above.
+8. Explain the Docker Compose services, health checks, migration job, monitoring and operational safeguards.
 
-| Requirement | Where |
-| --- | --- |
-| Five entry points | Section 7 |
-| Panel UI (header, action cards, close) | `frontend/components/ChatPanel.tsx`, `ActionCards.tsx` |
-| Loading and error states | "Thinking" status, `role="alert"` with Retry, fallback notice |
-| Token-by-token streaming | SSE over `fetch` in `frontend/lib/api.ts`; `compress: false` in `frontend/next.config.mjs` |
-| Zustand state, no prop drilling | `frontend/store/assistantStore.ts` |
-| Node + Express, TypeScript strict | `backend/tsconfig.json`, `frontend/tsconfig.json` |
-| API contract validated with Zod before the routes | `backend/src/schemas.ts`, `backend/src/middleware/validate.ts` |
-| Hand-written API contract | Zod contract plus `backend/src/openapi.ts` served at `/api/docs/` |
-| LLM server-side only | `backend/src/llm/anthropic.ts`; key read in `backend/src/config.ts`; the frontend holds no key |
-| Structured JSON validated with Zod, no regex parsing | Summary triage: forced tool call and `validateTriage` |
-| Prompts versioned in `prompts/` | `backend/src/prompts/*.ts` |
-| 8 second timeout and graceful degradation | `backend/src/llm/timeout.ts`, `backend/src/services/fallbacks.ts` |
-| Per-session rate limiting | `backend/src/middleware/rateLimit.ts` |
-| Policy note of 200-400 words, 3-5 chunks, in-memory retrieval | `backend/data/policy.md` (5 chunks), `backend/src/rag.ts` |
-| Tests: Jest with mocked LLM, Supertest (success and fallback), Vitest (loading, streaming, error) | Section 11 |
-| Short write-up, AI tools note | Sections 15 and 16 |
+Be clear about which integrations are configured in the demonstration environment. External ERP credentials, live LLM credentials, embeddings credentials and a real on-call webhook are environment-specific and should not be represented as active unless they have been configured and tested.
 
-## 14. Assumptions, substitutions and limitations
+## Verification status
 
-- **Next.js frontend plus a separate Express API** (the brief allows either). Express lets Supertest exercise the real app, and the Next rewrite keeps the API URL and key out of the browser.
-- **Keyword retrieval instead of pgvector**: five chunks do not justify a vector store.
-- **In-memory rate limiter**, keyed by the `X-Session-Id` the browser generates (IP as fallback). It guards against UI loops and runaway cost, not a determined attacker; a client can mint new session ids. Production would add IP and auth based limits and a shared store.
-- **Language** is sent with every request and enforced in the prompts. Built-in fallback text is English only.
-- **"Out loud" is text only.** There is no text-to-speech.
-- **Read-only assistant.** Approve and reject actions are out of scope; the panel advises and does not change the queue.
-- **Contract kept in two files** (backend and frontend), see section 6.
-- **No Loom walkthrough** is included.
-- **Commit history** is grouped by feature, not written test-first.
+The source archive includes automated test suites, TypeScript configurations, Dockerfiles, Compose orchestration and deployment/monitoring configuration. The presence of a test or configuration file does not by itself mean that the test has passed. Run the Docker-based checks in this README and retain their actual output when presenting the project. Database-dependent, browser E2E, external provider and webhook checks require their corresponding services or credentials to be available.
 
-## 15. AI tools used
+## License and usage
 
-Built with Claude's help for drafting code, tests and this README. Architecture, trade-offs and the final review are mine.
-
-## 16. Short write-up
-
-**Where AI earns its place.** *Talk to me* and *Teach me* need an LLM: they are open-ended, multi-turn and must adapt to follow-ups. *Present me Summary* needs it for the reasoning (ranking by urgency against the policy note), not for the plumbing, so that step returns Zod-validated JSON and the prose is narrated afterwards. *Help me* is retrieval first: if no policy chunk matches, no model call happens at all. *Replay Greeting* is the least necessary action. A template with the live count does the job; the LLM only adds variety, so it is the first thing I would cut on cost grounds.
-
-**Fallback design.** Every call has an 8s timeout (an idle timeout for streams). On a timeout, provider error, missing key, empty answer or schema-invalid output, the server swaps in a deterministic answer (policy-order ranking, the closest policy chunk, a static onboarding checklist, a count-based greeting) and streams it through the same SSE path with `fallback: true`. The UI shows a notice instead of breaking. If a stream dies after tokens were sent, an `error` event is emitted and the UI offers Retry. Nothing surfaces as a raw 500.
-
-**With more time.** I would add an eval set of queue/expected-triage pairs run against the real model in CI. The mocked tests prove we handle bad output, but not the quality of good output.
+This archive does not declare a separate open-source license. Confirm ownership and usage permissions before redistributing or deploying it outside the intended review or project environment.

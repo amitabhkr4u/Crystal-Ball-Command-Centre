@@ -22,6 +22,7 @@ const COMPOSER: Partial<Record<Mode, { label: string; hint: string }>> = {
 
 const RERUN: Partial<Record<Mode, string>> = { summary: "Refresh summary", greeting: "Replay Greeting" };
 
+// Shows the assistant chat panel and its composer.
 export function ChatPanel() {
   const { open, mode, status, error, messages, approvals, language } = useAssistantStore();
   const { openPanel, closePanel, backToMenu, setLanguage, startMode, sendMessage, retry } =
@@ -35,7 +36,13 @@ export function ChatPanel() {
 
   if (!open) {
     return (
-      <button type="button" className="launcher" aria-label="Open Approvals Assistant" onClick={openPanel}>
+      <button
+        type="button"
+        className="launcher"
+        aria-label="Open Approvals Assistant"
+        title="Approvals Assistant"
+        onClick={openPanel}
+      >
         <Sparkles size={22} />
       </button>
     );
@@ -44,6 +51,7 @@ export function ChatPanel() {
   const busy = status === "loading" || status === "streaming";
   const composer = mode ? COMPOSER[mode] : undefined;
 
+  // Sends the typed message and clears the box.
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!draft.trim() || busy) return;
@@ -52,7 +60,13 @@ export function ChatPanel() {
   };
 
   return (
-    <section className="panel" aria-label="Approvals Assistant panel">
+    <section
+      className="panel"
+      aria-label="Approvals Assistant panel"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") closePanel();
+      }}
+    >
       <header className="panel-header">
         {mode && (
           <button type="button" className="icon-btn" aria-label="Back to actions" onClick={backToMenu}>

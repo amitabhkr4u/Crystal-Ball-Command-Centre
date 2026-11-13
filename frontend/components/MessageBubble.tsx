@@ -2,6 +2,7 @@ import type { Approval } from "../lib/schemas";
 import { useAssistantStore, type MessageDebug, type UiMessage } from "../store/assistantStore";
 import { TriageList } from "./TriageList";
 
+// Builds the dev inspector line for an answer.
 function describeDebug(d: MessageDebug, fallback: boolean | undefined): string {
   const source =
     d.reason === "no_policy_match"
@@ -14,6 +15,7 @@ function describeDebug(d: MessageDebug, fallback: boolean | undefined): string {
     .join(" · ");
 }
 
+// Shows one chat message with its extras.
 export function MessageBubble({ message, approvals }: { message: UiMessage; approvals: Approval[] }) {
   const devMode = useAssistantStore((s) => s.devMode);
   const isUser = message.role === "user";

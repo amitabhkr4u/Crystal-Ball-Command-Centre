@@ -1,4 +1,7 @@
-.DS_Store
-Thumbs.db
-.idea
-.vscode/*
+
+# Deployment secrets
+.env
+backend/.env
+ops/metrics_token
+*.pem
+frontend/.env.local

@@ -5,7 +5,6 @@ import type { Approval, FallbackReason, Triage } from "../lib/schemas";
 export type Mode = "summary" | "talk" | "help" | "teach" | "greeting";
 export type Status = "idle" | "loading" | "streaming" | "error";
 
-/** What the "Dev inspector" shows under an assistant answer: which endpoint, which prompt, live vs fallback, how long. */
 export interface MessageDebug {
   path: AiPath;
   promptVersion?: string;
@@ -52,6 +51,7 @@ interface AssistantState {
   retry: () => void;
 }
 
+// Creates a random id for this chat session.
 const newSessionId = (): string =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
@@ -59,13 +59,11 @@ const newSessionId = (): string =>
 
 let activeController: AbortController | null = null;
 let counter = 0;
+// Creates the next message id.
 const nextId = (): string => `m${++counter}`;
 
-/**
- * Conversation/session state lives here (Zustand) so no component prop-drills it.
- * All network + streaming logic is in `run`; components only render state.
- */
 export const useAssistantStore = create<AssistantState>()((set, get) => {
+  // Streams one assistant answer into the store.
   async function run(path: AiPath, body: Record<string, unknown>, userText?: string): Promise<void> {
     activeController?.abort();
     const controller = new AbortController();
@@ -84,6 +82,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => {
       ]
     }));
 
+    // Updates fields of the current assistant message.
     const patch = (p: Partial<UiMessage>) =>
       set((s) => ({ messages: s.messages.map((m) => (m.id === assistantId ? { ...m, ...p } : m)) }));
 
@@ -135,6 +134,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => {
     }
   }
 
+  // Clears the conversation and sets the mode.
   const reset = (mode: Mode | null) => {
     activeController?.abort();
     activeController = null;
@@ -142,7 +142,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => {
   };
 
   return {
-    open: true,
+    open: false,
     mode: null,
     status: "idle",
     error: null,
@@ -154,15 +154,21 @@ export const useAssistantStore = create<AssistantState>()((set, get) => {
     lastRun: null,
     devMode: false,
 
+    // Turns the dev inspector on or off.
     toggleDevMode: () => set((s) => ({ devMode: !s.devMode })),
+    // Opens the assistant panel.
     openPanel: () => set({ open: true }),
+    // Resets the chat and closes the panel.
     closePanel: () => {
       reset(null);
       set({ open: false });
     },
+    // Returns to the action menu.
     backToMenu: () => reset(null),
+    // Saves the chosen answer language.
     setLanguage: (language) => set({ language }),
 
+    // Loads approvals into the store.
     loadApprovals: async () => {
       try {
         set({ approvals: await fetchApprovals(), approvalsError: null });
@@ -171,6 +177,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => {
       }
     },
 
+    // Starts a chat mode and runs its first request.
     startMode: (mode) => {
       reset(mode);
       const { language } = get();
@@ -179,6 +186,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => {
       else if (mode === "teach") void run("teach", { language, messages: [] });
     },
 
+    // Sends the user message in the current mode.
     sendMessage: (text) => {
       const clean = text.trim();
       const { mode, status, messages, language } = get();
@@ -191,6 +199,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => {
       else if (mode === "help") void run("help", { language, question: clean }, clean);
     },
 
+    // Runs the last request again.
     retry: () => {
       const { lastRun, messages } = get();
       if (!lastRun) return;
